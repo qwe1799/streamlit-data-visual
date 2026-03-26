@@ -12,7 +12,8 @@
 - 核心语言：Python
 - 可视化框架：Streamlit
 - 代码托管：GitHub
-- 在线部署：Streamlit Cloud
+- 在线部署：<img width="2517" height="1599" alt="image" src="https://github.com/user-attachments/assets/889c2283-dfee-432d-803d-b4f86a54b286" />
+
 
 ## 🚀 本地运行步骤
 ### 1. 环境准备
