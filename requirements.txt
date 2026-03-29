@@ -1,5 +1,6 @@
+
 streamlit>=1.30.0
 pandas>=2.1.0
-folium>=0.14.0
-streamlit-folium>=0.15.0
+folium==0.14.0          # 地图核心库
+streamlit-folium==0.15.0 # Streamlit 地图渲染桥接库
 numpy>=1.26.0
