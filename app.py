@@ -57,7 +57,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 初始化全局会话状态（提前初始化所有需要的key）
+# 初始化全局会话状态
 init_keys = [
     "heartbeat_data", "seq", "last_receive_time", "is_monitoring",
     "point_a", "point_b", "coord_system"
@@ -85,7 +85,7 @@ page = st.sidebar.radio(
     ["航线规划", "飞行监控"],
     index=0,
     format_func=lambda x: "🗺️ 航线规划" if x == "航线规划" else "✈️ 飞行监控",
-    key="sidebar_page_radio"  # 新增唯一key
+    key="sidebar_page_radio"
 )
 
 # ======================== 1. 航线规划页面（地图显示） ========================
@@ -97,34 +97,34 @@ if page == "航线规划":
 
     with col_sidebar:
         st.subheader("⚙️ 坐标系设置")
-        # 给radio设置唯一key
-        st.radio(
+        coord_system = st.radio(
             "输入坐标系",
             ["WGS-84", "GCJ-02(高德/百度)"],
             index=1,
-            key="coord_system_radio"  # 唯一key，避免重复
+            key="coord_system_radio"
         )
+        st.session_state.coord_system = coord_system  # 显式同步状态
 
         st.divider()
 
-        # 起点A设置（所有number_input添加唯一key）
+        # 起点A设置
         st.subheader("📍 起点A")
         a_lat = st.number_input("纬度", value=32.2322, format="%.4f", key="a_lat_input")
         a_lng = st.number_input("经度", value=118.7490, format="%.4f", key="a_lng_input")
         if st.button("设置A点", use_container_width=True, key="set_a_btn"):
-            if st.session_state.coord_system_radio == "GCJ-02(高德/百度)":
+            if st.session_state.coord_system == "GCJ-02(高德/百度)":
                 wgs_lng, wgs_lat = gcj02_to_wgs84(a_lng, a_lat)
             else:
                 wgs_lng, wgs_lat = a_lng, a_lat
             st.session_state.point_a = (wgs_lat, wgs_lng)
             st.success("A点已设")
 
-        # 终点B设置（所有number_input添加唯一key）
+        # 终点B设置
         st.subheader("📍 终点B")
         b_lat = st.number_input("纬度", value=32.2343, format="%.4f", key="b_lat_input")
         b_lng = st.number_input("经度", value=118.7490, format="%.4f", key="b_lng_input")
         if st.button("设置B点", use_container_width=True, key="set_b_btn"):
-            if st.session_state.coord_system_radio == "GCJ-02(高德/百度)":
+            if st.session_state.coord_system == "GCJ-02(高德/百度)":
                 wgs_lng, wgs_lat = gcj02_to_wgs84(b_lng, b_lat)
             else:
                 wgs_lng, wgs_lat = b_lng, b_lat
@@ -133,7 +133,7 @@ if page == "航线规划":
 
         st.divider()
 
-        # 系统状态展示（checkbox添加唯一key）
+        # 系统状态展示
         st.subheader("📊 系统状态")
         st.checkbox("A点已设", value=st.session_state.point_a is not None, 
                     disabled=True, key="a_point_checkbox")
@@ -142,13 +142,13 @@ if page == "航线规划":
 
     with col_map:
         st.subheader("🗺️ 地图")
-        # 初始化地图（高德瓦片源，国内稳定）
+        # 修复：改用海外稳定瓦片源（CartoDB），解决Streamlit Cloud地图加载问题
         map_center = st.session_state.point_a if st.session_state.point_a else (32.233, 118.749)
         m = folium.Map(
             location=map_center,
             zoom_start=18,
-            tiles='http://webrd02.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}',
-            attr='高德地图'
+            tiles="CartoDB Positron",  # 海外稳定瓦片源，替代高德
+            attr="CartoDB"
         )
 
         # 绘制起点A
@@ -176,7 +176,7 @@ if page == "航线规划":
                 dash_array="5,5"
             ).add_to(m)
 
-        # 渲染地图（添加唯一key）
+        # 渲染地图
         st_folium(m, width=900, height=600, use_container_width=False, key="route_map")
 
 # ======================== 2. 飞行监控页面（心跳包显示） ========================
@@ -192,7 +192,8 @@ elif page == "飞行监控":
         st.session_state.heartbeat_data.append({
             "序号": st.session_state.seq,
             "时间": current_time,
-            "状态": "正常"
+            "正常": 1 if st.session_state.seq % 4 != 0 else 0,  # 模拟正常/超时
+            "超时": 1 if st.session_state.seq % 4 == 0 else 0
         })
 
     def check_timeout():
@@ -201,7 +202,8 @@ elif page == "飞行监控":
             st.session_state.heartbeat_data.append({
                 "序号": st.session_state.seq,
                 "时间": pd.Timestamp.now(),
-                "状态": "超时"
+                "正常": 0,
+                "超时": 1
             })
             return True
         return False
@@ -209,7 +211,6 @@ elif page == "飞行监控":
     col_ctrl, col_chart = st.columns([1, 3])
     with col_ctrl:
         st.subheader("🔧 控制")
-        # 按钮添加唯一key
         if not st.session_state.is_monitoring:
             if st.button("🚀 开始监测", type="primary", use_container_width=True, 
                         key="start_monitor_btn"):
@@ -223,7 +224,7 @@ elif page == "飞行监控":
         if st.session_state.heartbeat_data:
             df = pd.DataFrame(st.session_state.heartbeat_data)
             st.metric("总心跳包数", len(df), key="total_packets_metric")
-            st.metric("超时次数", len(df[df["状态"] == "超时"]), key="timeout_count_metric")
+            st.metric("超时次数", df["超时"].sum(), key="timeout_count_metric")
 
     with col_chart:
         st.subheader("📈 心跳包实时展示")
@@ -234,9 +235,14 @@ elif page == "飞行监控":
             df = pd.DataFrame(st.session_state.heartbeat_data)
             
             with placeholder.container():
-                # 图表添加唯一key
-                st.line_chart(df, x="时间", y="序号", color="状态", 
-                             use_container_width=True, key="heartbeat_chart")
+                # 修复：改用宽表格式，避免color参数报错
+                st.line_chart(
+                    df,
+                    x="时间",
+                    y=["正常", "超时"],
+                    use_container_width=True,
+                    key="heartbeat_chart"
+                )
                 st.dataframe(df.tail(10), use_container_width=True, key="heartbeat_table")
                 if is_timeout:
                     st.error("⚠️ 连接超时！3秒未收到心跳包")
@@ -244,6 +250,11 @@ elif page == "飞行监控":
         
         if st.session_state.heartbeat_data:
             df = pd.DataFrame(st.session_state.heartbeat_data)
-            st.line_chart(df, x="时间", y="序号", color="状态", 
-                         use_container_width=True, key="heartbeat_chart_static")
+            st.line_chart(
+                df,
+                x="时间",
+                y=["正常", "超时"],
+                use_container_width=True,
+                key="heartbeat_chart_static"
+            )
             st.dataframe(df.tail(10), use_container_width=True, key="heartbeat_table_static")
