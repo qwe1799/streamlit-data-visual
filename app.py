@@ -103,7 +103,7 @@ if page == "航线规划":
             index=1,
             key="coord_system_radio"
         )
-        st.session_state.coord_system = coord_system  # 显式同步状态
+        st.session_state.coord_system = coord_system
 
         st.divider()
 
@@ -142,13 +142,13 @@ if page == "航线规划":
 
     with col_map:
         st.subheader("🗺️ 地图")
-        # 修复：改用海外稳定瓦片源（CartoDB），解决Streamlit Cloud地图加载问题
+        # 修复：改用 OpenStreetMap 瓦片源（海外最稳定）
         map_center = st.session_state.point_a if st.session_state.point_a else (32.233, 118.749)
         m = folium.Map(
             location=map_center,
-            zoom_start=18,
-            tiles="CartoDB Positron",  # 海外稳定瓦片源，替代高德
-            attr="CartoDB"
+            zoom_start=17,  # 降低缩放级别，减少加载压力
+            tiles="OpenStreetMap",
+            attr="OpenStreetMap"
         )
 
         # 绘制起点A
@@ -192,8 +192,8 @@ elif page == "飞行监控":
         st.session_state.heartbeat_data.append({
             "序号": st.session_state.seq,
             "时间": current_time,
-            "正常": 1 if st.session_state.seq % 4 != 0 else 0,  # 模拟正常/超时
-            "超时": 1 if st.session_state.seq % 4 == 0 else 0
+            "正常": 1,
+            "超时": 0
         })
 
     def check_timeout():
@@ -223,8 +223,9 @@ elif page == "飞行监控":
         st.subheader("📊 统计")
         if st.session_state.heartbeat_data:
             df = pd.DataFrame(st.session_state.heartbeat_data)
-            st.metric("总心跳包数", len(df), key="total_packets_metric")
-            st.metric("超时次数", df["超时"].sum(), key="timeout_count_metric")
+            # 修复：移除 st.metric 的 key 参数
+            st.metric("总心跳包数", len(df))
+            st.metric("超时次数", df["超时"].sum())
 
     with col_chart:
         st.subheader("📈 心跳包实时展示")
@@ -235,13 +236,12 @@ elif page == "飞行监控":
             df = pd.DataFrame(st.session_state.heartbeat_data)
             
             with placeholder.container():
-                # 修复：改用宽表格式，避免color参数报错
+                # 修复：移除 line_chart 的 key 参数（兼容旧版）
                 st.line_chart(
                     df,
                     x="时间",
                     y=["正常", "超时"],
-                    use_container_width=True,
-                    key="heartbeat_chart"
+                    use_container_width=True
                 )
                 st.dataframe(df.tail(10), use_container_width=True, key="heartbeat_table")
                 if is_timeout:
@@ -254,7 +254,6 @@ elif page == "飞行监控":
                 df,
                 x="时间",
                 y=["正常", "超时"],
-                use_container_width=True,
-                key="heartbeat_chart_static"
+                use_container_width=True
             )
             st.dataframe(df.tail(10), use_container_width=True, key="heartbeat_table_static")
