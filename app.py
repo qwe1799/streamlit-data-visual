@@ -18,40 +18,35 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 百度地图（无密钥直接显示！） --------------------------
+# -------------------------- 纯开源地图（绝对不需要AK/密钥）--------------------------
 def map_html(latA, lngA, latB, lngB):
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <title>Baidu Map</title>
-        <script src="https://api.map.baidu.com/api?v=3.0&ak=Fi1Lg1WU9vZGXrG7u0eK8zZ7Q0eU8xXK"></script>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
+        <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
         <style>#map {{width:100%;height:650px;border-radius:10px;}}</style>
     </head>
     <body>
         <div id="map"></div>
         <script>
-            var map = new BMapGL.Map("map");
-            var pointA = new BMapGL.Point({lngA}, {latA});
-            var pointB = new BMapGL.Point({lngB}, {latB});
-            
-            map.centerAndZoom(pointA, 19);
-            map.enableScrollWheelZoom(true);
+            var map = L.map('map').setView([{latA}, {lngA}], 18);
+            L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {{
+                maxZoom: 19
+            }}).addTo(map);
 
-            // 标记A点
-            var markerA = new BMapGL.Marker(pointA);
-            map.addOverlay(markerA);
+            // A点标记
+            L.marker([{latA}, {lngA}]).addTo(map).bindPopup("A点");
 
-            // 标记B点
-            var markerB = new BMapGL.Marker(pointB);
-            map.addOverlay(markerB);
+            // B点标记
+            L.marker([{latB}, {lngB}]).addTo(map).bindPopup("B点");
 
             // 红色航线
-            var line = new BMapGL.Polyline([pointA, pointB], {{
-                strokeColor:"red", strokeWeight:5, strokeOpacity:0.8
-            }});
-            map.addOverlay(line);
+            L.polyline([[{latA},{lngA}], [{latB},{lngB}]], {{
+                color: "red", weight: 5, opacity: 0.8
+            }}).addTo(map);
         </script>
     </body>
     </html>
@@ -102,11 +97,11 @@ with col_right:
             st.markdown("##### ")
             lngB = st.number_input("经度 ", value=118.7490, format="%.6f")
 
-        # ✅ 地图显示（100% 能出来）
+        # ✅ 地图 100% 显示
         components.html(map_html(latA, lngA, latB, lngB), height=670)
 
     else:
-        # 心跳监测（你给的原版）
+        # 心跳监测
         st.title("无人机通信心跳监测可视化")
 
         if "heartbeat_data" not in st.session_state:
