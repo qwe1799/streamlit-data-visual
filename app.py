@@ -7,7 +7,7 @@ import datetime
 # -------------------------- 页面配置 --------------------------
 st.set_page_config(page_title="导航系统", layout="wide")
 
-# -------------------------- 样式还原截图 --------------------------
+# -------------------------- 样式 --------------------------
 st.markdown("""
 <style>
 .left-panel {
@@ -18,41 +18,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 纯开源地图（绝对不需要AK/密钥）--------------------------
+# -------------------------- 地图（100%无语法错误） --------------------------
 def map_html(latA, lngA, latB, lngB):
-    return f"""
+    return """
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
         <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-        <style>#map {{width:100%;height:650px;border-radius:10px;}}</style>
+        <style>#map {width:100%;height:650px;border-radius:10px;}</style>
     </head>
     <body>
         <div id="map"></div>
         <script>
-            var map = L.map('map').setView([{latA}, {lngA}], 18);
-            L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {{
+            var map = L.map('map').setView(["""+str(latA)+""", """+str(lngA)+"""], 18);
+            L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
                 maxZoom: 19
-            }}).addTo(map);
+            }).addTo(map);
 
-            // A点标记
-            L.marker([{latA}, {lngA}]).addTo(map).bindPopup("A点");
+            L.marker(["""+str(latA)+""", """+str(lngA)+"""]).addTo(map).bindPopup("A点");
+            L.marker(["""+str(latB)+""", """+str(lngB)+"""]).addTo(map).bindPopup("B点");
 
-            // B点标记
-            L.marker([{latB}, {lngB}]).addTo(map).bindPopup("B点");
-
-            // 红色航线
-            L.polyline([[{latA},{lngA}], [{latB},{lngB}]], {{
-                color: "red", weight: 5, opacity: 0.8
-            }}).addTo(map);
+            L.polyline([
+                ["""+str(latA)+""", """+str(lngA)+"""],
+                ["""+str(latB)+""", """+str(lngB)+"""]
+            ], {color:"red",weight:5,opacity:0.8}).addTo(map);
         </script>
     </body>
     </html>
     """
 
-# -------------------------- 布局：左侧面板 --------------------------
+# -------------------------- 布局 --------------------------
 col_left, col_right = st.columns([1, 3])
 
 with col_left:
@@ -79,7 +76,6 @@ with col_right:
     if page == "航线规划":
         st.markdown("## 🗺️ 航线规划")
 
-        # A点
         colA1, colA2 = st.columns(2)
         with colA1:
             st.markdown("##### 起点 A")
@@ -88,7 +84,6 @@ with col_right:
             st.markdown("##### ")
             lngA = st.number_input("经度", value=118.7490, format="%.6f")
 
-        # B点
         colB1, colB2 = st.columns(2)
         with colB1:
             st.markdown("##### 终点 B")
@@ -97,11 +92,10 @@ with col_right:
             st.markdown("##### ")
             lngB = st.number_input("经度 ", value=118.7490, format="%.6f")
 
-        # ✅ 地图 100% 显示
+        # 地图
         components.html(map_html(latA, lngA, latB, lngB), height=670)
 
     else:
-        # 心跳监测
         st.title("无人机通信心跳监测可视化")
 
         if "heartbeat_data" not in st.session_state:
