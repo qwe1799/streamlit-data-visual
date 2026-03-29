@@ -57,17 +57,27 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 初始化全局会话状态
-if "heartbeat_data" not in st.session_state:
-    st.session_state.heartbeat_data = []
-    st.session_state.seq = 0
-    st.session_state.last_receive_time = time.time()
-    st.session_state.is_monitoring = False
-    st.session_state.point_a = None
-    st.session_state.point_b = None
-    st.session_state.coord_system = "GCJ-02"
+# 初始化全局会话状态（提前初始化所有需要的key，避免赋值报错）
+init_keys = [
+    "heartbeat_data", "seq", "last_receive_time", "is_monitoring",
+    "point_a", "point_b", "coord_system"
+]
+for key in init_keys:
+    if key not in st.session_state:
+        if key == "heartbeat_data":
+            st.session_state[key] = []
+        elif key == "seq":
+            st.session_state[key] = 0
+        elif key == "last_receive_time":
+            st.session_state[key] = time.time()
+        elif key == "is_monitoring":
+            st.session_state[key] = False
+        elif key == "coord_system":
+            st.session_state[key] = "GCJ-02(高德/百度)"  # 初始化默认值
+        else:
+            st.session_state[key] = None
 
-# ======================== 侧边栏导航（与图片完全一致） ========================
+# ======================== 侧边栏导航 ========================
 st.sidebar.title("📌 导航")
 st.sidebar.subheader("功能页面")
 page = st.sidebar.radio(
@@ -86,13 +96,13 @@ if page == "航线规划":
 
     with col_sidebar:
         st.subheader("⚙️ 坐标系设置")
-        coord_option = st.radio(
+        # 关键修复：将session_state赋值直接整合到st.radio的key中，无需手动赋值
+        st.radio(
             "输入坐标系",
             ["WGS-84", "GCJ-02(高德/百度)"],
             index=1,
-            key="coord_system"
+            key="coord_system"  # 直接用key绑定session_state，自动更新
         )
-        st.session_state.coord_system = coord_option
 
         st.divider()
 
