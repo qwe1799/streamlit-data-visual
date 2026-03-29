@@ -23,3 +23,11 @@
 克隆本仓库后，在项目根目录执行以下命令安装依赖：
 ```bash
 pip install -r requirements.txt
+
+###加入新功能并修改
+多页面拆分	采用 pages/ 目录结构，通过 st.switch_page 实现导航
+坐标系转换	封装 utils/coord.py，支持 GCJ-02 ↔ WGS-84 双向转换
+3D/2D 地图	集成 folium + streamlit-folium，支持放大查看二维地图
+障碍物标注	通过地图点击添加顶点，完成多边形绘制
+心跳包展示	独立页面实现，支持实时折线图与表格展示
+掉线检测	3 秒无心跳触发超时告警，记录状态到数据中
