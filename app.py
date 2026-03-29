@@ -1,164 +1,151 @@
-# app.py 最终纯净版
-import streamlit as st
-import time
-import pandas as pd
 import math
-import folium
-from streamlit_folium import st_folium
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QRadioButton,
+                             QButtonGroup, QLabel, QStackedWidget,
+                             QMainWindow, QApplication)
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+import sys
 
-# 坐标转换工具函数
-x_pi = 3.14159265358979324 * 3000.0 / 180.0
-pi = 3.1415926535897932384626
-a = 6378245.0
-ee = 0.00669342162296594323
-
-def out_of_china(lng, lat):
-    if lng < 72.004 or lng > 137.8347:
-        return True
-    if lat < 0.8293 or lat > 55.8271:
-        return True
-    return False
+# ===================== 坐标系转换工具类 =====================
+def gcj02_to_wgs84(lat, lng):
+    a = 6378245.0
+    ee = 0.00669342162296594323
+    dLat = _transform_lat(lng - 105.0, lat - 35.0)
+    dLng = _transform_lng(lng - 105.0, lat - 35.0)
+    radLat = lat / 180.0 * math.pi
+    magic = math.sin(radLat)
+    magic = 1 - ee * magic * magic
+    sqrtMagic = math.sqrt(magic)
+    dLat = (dLat * 180.0) / ((a * (1 - ee)) / (magic * sqrtMagic) * math.pi)
+    dLng = (dLng * 180.0) / (a / sqrtMagic * math.cos(radLat) * math.pi)
+    mgLat = lat + dLat
+    mgLng = lng + dLng
+    return lat * 2 - mgLat, lng * 2 - mgLng
 
 def _transform_lat(x, y):
-    ret = -100.0 + 2.0*x + 3.0*y + 0.2*y*y + 0.1*x*y + 0.2*math.sqrt(abs(x))
-    ret += (20.0*math.sin(6.0*x*pi) + 20.0*math.sin(2.0*x*pi)) * 2.0 / 3.0
-    ret += (20.0*math.sin(y*pi) + 40.0*math.sin(y/3.0*pi)) * 2.0 / 3.0
-    ret += (160.0*math.sin(y/12.0*pi) + 320*math.sin(y*pi/30.0)) * 2.0 / 3.0
+    ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y * math.pi / 30.0)) * 2.0 / 3.0
     return ret
 
 def _transform_lng(x, y):
-    ret = 300.0 + x + 2.0*y + 0.1*x*x + 0.1*x*y + 0.1*math.sqrt(abs(x))
-    ret += (20.0*math.sin(6.0*x*pi) + 20.0*math.sin(2.0*x*pi)) * 2.0 / 3.0
-    ret += (20.0*math.sin(x*pi) + 40.0*math.sin(x/3.0*pi)) * 2.0 / 3.0
-    ret += (150.0*math.sin(x/12.0*pi) + 300*math.sin(x/30.0*pi)) * 2.0 / 3.0
+    ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-def wgs84_to_gcj02(lng, lat):
-    if out_of_china(lng, lat):
-        return lng, lat
-    dlat = _transform_lat(lng - 105.0, lat - 35.0)
-    dlng = _transform_lng(lng - 105.0, lat - 35.0)
-    mglat = lat + dlat
-    mglng = lng + dlng
-    return (mglng, mglat)
+# ===================== 航线规划页面 =====================
+class NavigationPage(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.init_ui()
 
-def gcj02_to_wgs84(lng, lat):
-    if out_of_china(lng, lat):
-        return lng, lat
-    dlat = _transform_lat(lng - 105.0, lat - 35.0)
-    dlng = _transform_lng(lng - 105.0, lat - 35.0)
-    mglat = lat + dlat
-    mglng = lng + dlng
-    return (lng * 2 - mglng, lat * 2 - mglat)
+    def init_ui(self):
+        layout = QVBoxLayout()
 
-# 页面配置
-st.set_page_config(page_title="无人机心跳监测", layout="wide")
+        # 页面切换按钮
+        self.btn_group = QButtonGroup(self)
+        self.route_plan_btn = QRadioButton("航线规划")
+        self.flight_monitor_btn = QRadioButton("飞行监控")
+        self.btn_group.addButton(self.route_plan_btn, 0)
+        self.btn_group.addButton(self.flight_monitor_btn, 1)
+        self.route_plan_btn.setChecked(True)
 
-# 初始化状态
-if "heartbeat_data" not in st.session_state:
-    st.session_state.heartbeat_data = []
-    st.session_state.seq = 0
-    st.session_state.last_receive_time = time.time()
-    st.session_state.is_monitoring = False
-    st.session_state.point_a = None
-    st.session_state.point_b = None
-    st.session_state.coord_system = "GCJ-02(高德/百度)"
+        layout.addWidget(QLabel("导航功能"))
+        layout.addWidget(self.route_plan_btn)
+        layout.addWidget(self.flight_monitor_btn)
 
-# 侧边栏导航
-st.sidebar.title("导航")
-page = st.sidebar.radio("", ["航线规划", "飞行监控"], key="page")
+        # 坐标系切换
+        layout.addWidget(QLabel("坐标系选择"))
+        self.coord_group = QButtonGroup(self)
+        self.wgs_btn = QRadioButton("WGS-84")
+        self.gcj_btn = QRadioButton("GCJ-02")
+        self.coord_group.addButton(self.wgs_btn, 0)
+        self.coord_group.addButton(self.gcj_btn, 1)
+        self.gcj_btn.setChecked(True)
+        layout.addWidget(self.wgs_btn)
+        layout.addWidget(self.gcj_btn)
 
-# 航线规划
-if page == "航线规划":
-    st.title("🗺️ 航线规划")
-    col1, col2 = st.columns([1, 3])
+        # 状态提示
+        layout.addWidget(QLabel("系统状态"))
+        self.status_a = QLabel("✅ A点已设置")
+        self.status_b = QLabel("✅ B点已设置")
+        layout.addWidget(self.status_a)
+        layout.addWidget(self.status_b)
 
-    with col1:
-        st.subheader("设置")
-        coord = st.radio("坐标系", ["WGS-84", "GCJ-02(高德/百度)"], key="coord")
-        st.session_state.coord_system = coord
+        # 地图组件
+        self.map_view = QWebEngineView()
+        self.map_view.setHtml(self.get_map_html())
+        layout.addWidget(self.map_view)
 
-        st.subheader("起点A")
-        a_lat = st.number_input("A纬度", 32.2322, format="%.4f", key="a_lat")
-        a_lng = st.number_input("A经度", 118.7490, format="%.4f", key="a_lng")
-        if st.button("设置A点"):
-            if coord == "GCJ-02(高德/百度)":
-                wgs_lng, wgs_lat = gcj02_to_wgs84(a_lng, a_lat)
-            else:
-                wgs_lng, wgs_lat = a_lng, a_lat
-            st.session_state.point_a = (wgs_lat, wgs_lng)
+        self.setLayout(layout)
 
-        st.subheader("终点B")
-        b_lat = st.number_input("B纬度", 32.2343, format="%.4f", key="b_lat")
-        b_lng = st.number_input("B经度", 118.7490, format="%.4f", key="b_lng")
-        if st.button("设置B点"):
-            if coord == "GCJ-02(高德/百度)":
-                wgs_lng, wgs_lat = gcj02_to_wgs84(b_lng, b_lat)
-            else:
-                wgs_lng, wgs_lat = b_lng, b_lat
-            st.session_state.point_b = (wgs_lat, wgs_lng)
+    def get_map_html(self):
+        return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+            <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+            <style> #map { height:400px; } </style>
+        </head>
+        <body>
+            <div id="map"></div>
+            <script>
+                var map = L.map('map').setView([32.233, 118.75], 19);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                var A = L.marker([32.232, 118.749]).addTo(map).bindPopup("起点A");
+                var B = L.marker([32.234, 118.751]).addTo(map).bindPopup("终点B");
+                L.polyline([[32.232,118.749],[32.234,118.751]],{color:"red",weight:3}).addTo(map);
+            </script>
+        </body>
+        </html>
+        """
 
-        st.checkbox("A点已设", st.session_state.point_a is not None, disabled=True)
-        st.checkbox("B点已设", st.session_state.point_b is not None, disabled=True)
+# ===================== 飞行监控页面（心跳包） =====================
+class FlightMonitorPage(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout()
+        layout.addWidget(QLabel("=== 飞行监控 ==="))
+        layout.addWidget(QLabel("实时心跳包显示区域"))
+        self.heart_label = QLabel("等待心跳包数据...")
+        layout.addWidget(self.heart_label)
+        self.setLayout(layout)
 
-    with col2:
-        st.subheader("地图")
-        center = st.session_state.point_a or (32.233, 118.749)
-        m = folium.Map(location=center, zoom_start=17, tiles="OpenStreetMap")
-        if st.session_state.point_a:
-            folium.Marker(st.session_state.point_a, icon=folium.Icon(color="red"), popup="A").add_to(m)
-        if st.session_state.point_b:
-            folium.Marker(st.session_state.point_b, icon=folium.Icon(color="green"), popup="B").add_to(m)
-        if st.session_state.point_a and st.session_state.point_b:
-            folium.PolyLine([st.session_state.point_a, st.session_state.point_b], color="blue", weight=3).add_to(m)
-        st_folium(m, width=900, height=600)
+    def update_heartbeat(self, data):
+        self.heart_label.setText(f"[实时心跳] {data}")
 
-# 飞行监控
-elif page == "飞行监控":
-    st.title("✈️ 飞行监控")
+# ===================== 主窗口 =====================
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("导航与飞行监控系统")
+        self.setGeometry(100,100,900,700)
 
-    def simulate_heartbeat():
-        st.session_state.seq += 1
-        st.session_state.last_receive_time = time.time()
-        st.session_state.heartbeat_data.append({
-            "序号": st.session_state.seq,
-            "时间": pd.Timestamp.now(),
-            "正常": 1, "超时": 0
-        })
+        # 堆栈窗口
+        self.stack = QStackedWidget()
+        self.nav_page = NavigationPage()
+        self.monitor_page = FlightMonitorPage()
+        self.stack.addWidget(self.nav_page)
+        self.stack.addWidget(self.monitor_page)
 
-    def check_timeout():
-        if time.time() - st.session_state.last_receive_time > 3:
-            st.session_state.heartbeat_data.append({
-                "序号": st.session_state.seq,
-                "时间": pd.Timestamp.now(),
-                "正常": 0, "超时": 1
-            })
-            return True
-        return False
+        self.setCentralWidget(self.stack)
 
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        st.subheader("控制")
-        if st.button("开始监测"):
-            st.session_state.is_monitoring = True
-        if st.button("停止监测"):
-            st.session_state.is_monitoring = False
+        # 绑定切换
+        self.nav_page.btn_group.buttonClicked.connect(self.switch_page)
 
-        if st.session_state.heartbeat_data:
-            df = pd.DataFrame(st.session_state.heartbeat_data)
-            st.metric("总心跳", len(df))
-            st.metric("超时", df["超时"].sum())
+    def switch_page(self, btn):
+        if btn == self.nav_page.route_plan_btn:
+            self.stack.setCurrentIndex(0)
+        else:
+            self.stack.setCurrentIndex(1)
 
-    with col2:
-        st.subheader("实时数据")
-        placeholder = st.empty()
-        while st.session_state.is_monitoring:
-            simulate_heartbeat()
-            timeout = check_timeout()
-            df = pd.DataFrame(st.session_state.heartbeat_data)
-            with placeholder:
-                st.line_chart(df, x="时间", y=["正常", "超时"])
-                st.dataframe(df.tail(10))
-                if timeout:
-                    st.error("⚠️ 连接超时！")
-            time.sleep(1)
+# ===================== 启动程序 =====================
+if __name__ == "__main__":
+    app = QApplication(sys.argv)
+    window = MainWindow()
+    window.show()
+    sys.exit(app.exec_())
