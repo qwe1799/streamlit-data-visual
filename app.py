@@ -26,9 +26,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # -------------------------- 双重记忆存储（核心） --------------------------
-# 1. 长期记忆：本地JSON，重启/关闭都不丢（永久保存）
 OBSTACLE_FILE = "obstacles.json"
-# 2. 临时记忆：session_state，圈选中途不丢点（会话记忆）
 TEMP_POINTS_FILE = "temp_obstacle_points.json"
 
 def load_obstacles():
@@ -41,7 +39,6 @@ def save_obstacles(obs_list):
     with open(OBSTACLE_FILE, 'w', encoding='utf-8') as f:
         json.dump(obs_list, f, ensure_ascii=False, indent=2)
 
-# 临时点记忆：保存当前未完成的圈选点
 def save_temp_points(points):
     with open(TEMP_POINTS_FILE, 'w', encoding='utf-8') as f:
         json.dump(points, f, ensure_ascii=False)
@@ -55,10 +52,8 @@ def load_temp_points():
 # -------------------------- 初始化状态（强制记忆） --------------------------
 if "drawing" not in st.session_state:
     st.session_state.drawing = False
-# 从临时文件恢复未完成的点，实现圈选记忆
 if "current_points" not in st.session_state:
     st.session_state.current_points = load_temp_points()
-# 心跳监控状态
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
@@ -81,22 +76,18 @@ def gcj_to_wgs(lat, lon):
 def _transform_lat(x, y):
     ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y * 3.1415926 / 30.0)) * 2.0 / 3.0
     return ret
 
 def _transform_lon(x, y):
     ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
-    ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x * 3.1415926 / 30.0)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图渲染（自动恢复记忆点） --------------------------
+# -------------------------- 地图渲染（核心：强制点同步） --------------------------
 def render_map(latA, lngA, latB, lngB, map_type):
     obstacles = load_obstacles()
     drawing = st.session_state.drawing
-    points = st.session_state.current_points  # 从记忆加载
+    points = st.session_state.current_points
 
     if map_type == "卫星影像地图":
         latA, lngA = gcj_to_wgs(latA, lngA)
@@ -124,21 +115,23 @@ def render_map(latA, lngA, latB, lngB, map_type):
             var map = L.map('map').setView([32.2335, 118.7475], 17);
             L.tileLayer('{layer}', {{maxZoom:20, attribution:'{attr}'}}).addTo(map);
 
-            // 航线
+            // 绘制航线
             L.polyline([[{latA},{lngA}],[{latB},{lngB}]], {{color:'red',weight:4}}).addTo(map);
             L.marker([{latA},{lngA}]).bindPopup("起点").addTo(map);
             L.marker([{latB},{lngB}]).bindPopup("终点").addTo(map);
 
-            // 永久障碍物（红色）
+            // 绘制永久障碍物（红色半透明）
             const obs = {json.dumps(obstacles)};
             obs.forEach(o => {{
                 L.polygon(o.points, {{color:'#f00',fillColor:'#f44',fillOpacity:0.3}})
                  .bindPopup(o.name + " " + o.height + "m").addTo(map);
             }});
 
-            // 恢复记忆中的临时点（蓝色）
+            // 初始化临时点（从记忆加载）
             var points = {points_json};
             var poly = null;
+
+            // 绘制临时多边形（蓝色半透明）
             function redraw() {{
                 if (poly) map.removeLayer(poly);
                 if (points.length >= 2) {{
@@ -147,7 +140,7 @@ def render_map(latA, lngA, latB, lngB, map_type):
             }}
             redraw();
 
-            // 绘制模式：打点并实时保存记忆
+            // 仅在绘制模式下响应点击，强制回传点集
             if ({str(drawing).lower()}) {{
                 map.on('click', function(e) {{
                     points.push([e.latlng.lat, e.latlng.lng]);
@@ -175,7 +168,7 @@ with col_left:
         height = st.number_input("高度(m)", min_value=1, max_value=500, value=25, step=1)
         name = st.text_input("名称", value="教学楼")
 
-        # 显示当前记忆点数量
+        # 实时显示已打点数量
         st.info(f"当前已打点：{len(st.session_state.current_points)} 个（记忆保存）")
 
         if not st.session_state.drawing:
@@ -184,6 +177,7 @@ with col_left:
                 st.rerun()
         else:
             if st.button("✅ 保存并结束（永久记忆）", type="primary", use_container_width=True):
+                # 强制校验点集，写入永久存储
                 if len(st.session_state.current_points) >= 3:
                     all_obs = load_obstacles()
                     all_obs.append({
@@ -192,7 +186,7 @@ with col_left:
                         "points": st.session_state.current_points
                     })
                     save_obstacles(all_obs)
-                    st.success("✅ 永久保存成功！")
+                    st.success("✅ 障碍物已永久保存！")
                 # 清空临时记忆
                 st.session_state.current_points = []
                 save_temp_points([])
@@ -236,8 +230,10 @@ with col_right:
 
     if page == "航线规划":
         map_type = st.radio("🗺️ 地图模式", ["高德普通地图", "卫星影像地图"], horizontal=True)
+        st.markdown("### ⛰️ 飞行高度设置")
         fly_h = st.number_input("飞行高度(m)", min_value=1, max_value=500, value=50, step=1)
 
+        st.markdown("### 🎯 航线坐标")
         c1, c2 = st.columns(2)
         with c1:
             latA = st.number_input("起点纬度", value=32.2335, format="%.6f")
@@ -246,14 +242,14 @@ with col_right:
             latB = st.number_input("终点纬度", value=32.2338, format="%.6f")
             lngB = st.number_input("终点经度", value=118.7479, format="%.6f")
 
-        # 渲染地图，同步并保存临时记忆点
+        # 核心：强制同步点集到 session_state 和临时文件
         map_res = components.html(render_map(latA, lngA, latB, lngB, map_type), height=680)
         if isinstance(map_res, list) and st.session_state.drawing:
             st.session_state.current_points = map_res
             save_temp_points(map_res)  # 实时写入临时记忆文件
 
     else:
-        # 心跳监控（完整保留）
+        # 完整保留心跳监控功能
         st.title("📡 无人机心跳监控")
         c1, c2 = st.columns(2)
         with c1:
