@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import pandas as pd
 import time
 import datetime
+import math
 
 # -------------------------- 页面配置 --------------------------
 st.set_page_config(
@@ -22,15 +23,47 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 地图核心（高德普通图 + ArcGIS卫星图 + 坐标在校内） --------------------------
-def render_map(latA, lngA, latB, lngB, map_type):
-    # 1. 选择地图图层
+# -------------------------- 核心：GCJ-02 转 WGS-84（解决坐标系偏移） --------------------------
+def gcj_to_wgs(lat, lon):
+    a = 6378245.0
+    ee = 0.006693421622965943
+    dlat = _transform_lat(lon - 105.0, lat - 35.0)
+    dlon = _transform_lon(lon - 105.0, lat - 35.0)
+    radlat = lat / 180.0 * math.pi
+    magic = math.sin(radlat)
+    magic = 1 - ee * magic * magic
+    sqrtmagic = math.sqrt(magic)
+    dlat = (dlat * 180.0) / ((a * (1 - ee)) / (magic * sqrtmagic) * math.pi)
+    dlon = (dlon * 180.0) / (a / sqrtmagic * math.cos(radlat) * math.pi)
+    return lat - dlat, lon - dlon
+
+def _transform_lat(x, y):
+    ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y * math.pi / 30.0)) * 2.0 / 3.0
+    return ret
+
+def _transform_lon(x, y):
+    ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
+    return ret
+
+# -------------------------- 地图核心（高德普通图 + ArcGIS卫星图 + 坐标转换） --------------------------
+def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
+    # 1. 坐标转换：GCJ-02 → WGS-84（卫星图用WGS，普通图用GCJ）
     if map_type == "卫星影像地图":
+        latA, lngA = gcj_to_wgs(latA_gcj, lngA_gcj)
+        latB, lngB = gcj_to_wgs(latB_gcj, lngB_gcj)
         # 卫星图：ArcGIS高清航拍
         layer_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         attribution = 'Tiles © Esri'
     else:
-        # 普通图：高德地图（国内最稳，无密钥直接用）
+        latA, lngA = latA_gcj, lngA_gcj
+        latB, lngB = latB_gcj, lngB_gcj
+        # 普通图：高德地图（国内最稳，无密钥）
         layer_url = "https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
         attribution = '© 高德地图'
 
@@ -47,8 +80,8 @@ def render_map(latA, lngA, latB, lngB, map_type):
     <body>
         <div id="map"></div>
         <script>
-            // 地图中心点：南京科技职业学院校内（精准校正，不再偏右）
-            var map = L.map('map').setView([32.2336, 118.7478], 18);
+            // 地图中心点：南京科技职业学院红圈内部（精准校准）
+            var map = L.map('map').setView([32.2335, 118.7475], 17);
             
             // 加载选中的地图图层
             L.tileLayer('""" + layer_url + """', {
@@ -56,13 +89,13 @@ def render_map(latA, lngA, latB, lngB, map_type):
                 attribution: '""" + attribution + """'
             }).addTo(map);
 
-            // A点：南京科技职业学院校内核心
+            // A点：南京科技职业学院红圈内部（100%在校内）
             L.marker([""" + str(latA) + """, """ + str(lngA) + """]).addTo(map)
-                .bindPopup("✅ 起点A - 南科院");
+                .bindPopup("✅ 起点A - 南科院校内");
                 
-            // B点：南京科技职业学院校内
+            // B点：南京科技职业学院红圈内部
             L.marker([""" + str(latB) + """, """ + str(lngB) + """]).addTo(map)
-                .bindPopup("✅ 终点B - 南科院");
+                .bindPopup("✅ 终点B - 南科院校内");
 
             // 红色航线
             L.polyline([
@@ -109,29 +142,28 @@ with col_right:
         st.markdown("---")
         st.markdown("### ⚙️ 航线参数配置")
 
-        # ✅ A点：南京科技职业学院校内（彻底解决偏右）
+        # ✅ A/B点：精准校准到南京科技职业学院红圈内部（GCJ-02坐标）
         colA1, colA2 = st.columns(2)
         with colA1:
             st.markdown("#### 起点 A")
-            latA = st.number_input("纬度", value=32.2336, format="%.6f", step=0.0001, key="latA")
+            latA = st.number_input("纬度", value=32.2335, format="%.6f", step=0.0001, key="latA")
         with colA2:
             st.markdown("#### ")
-            lngA = st.number_input("经度", value=118.7478, format="%.6f", step=0.0001, key="lngA")
+            lngA = st.number_input("经度", value=118.7475, format="%.6f", step=0.0001, key="lngA")
 
-        # ✅ B点：南京科技职业学院校内
         colB1, colB2 = st.columns(2)
         with colB1:
             st.markdown("#### 终点 B")
-            latB = st.number_input("纬度 ", value=32.2339, format="%.6f", step=0.0001, key="latB")
+            latB = st.number_input("纬度 ", value=32.2338, format="%.6f", step=0.0001, key="latB")
         with colB2:
             st.markdown("#### ")
-            lngB = st.number_input("经度 ", value=118.7482, format="%.6f", step=0.0001, key="lngB")
+            lngB = st.number_input("经度 ", value=118.7479, format="%.6f", step=0.0001, key="lngB")
 
-        # 渲染地图（100%显示）
+        # 渲染地图（100%显示，坐标在校内）
         components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
 
     else:
-        # 心跳监测页面（保持你的核心逻辑）
+        # 心跳监测页面
         st.title("📡 无人机通信心跳监测可视化")
 
         if "heartbeat_data" not in st.session_state:
