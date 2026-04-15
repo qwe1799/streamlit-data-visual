@@ -25,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 障碍物文件存储 --------------------------
+# -------------------------- 障碍物持久化 --------------------------
 OBSTACLE_FILE = "obstacles.json"
 
 def load_obstacles():
@@ -49,13 +49,14 @@ def delete_obstacle(index):
         del data[index]
         save_obstacles(data)
 
-# -------------------------- 初始化session状态 --------------------------
+# -------------------------- 初始化状态 --------------------------
 if "draw_mode" not in st.session_state:
     st.session_state.draw_mode = False
+if "map_data" not in st.session_state:
+    st.session_state.map_data = {"points": [], "is_valid": False}
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
-    st.session_state.last_receive_time = time.time()
     st.session_state.running = False
 
 # -------------------------- 坐标转换 --------------------------
@@ -86,7 +87,7 @@ def _transform_lon(x, y):
     ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图渲染（已修复JS错误） --------------------------
+# -------------------------- 地图渲染 --------------------------
 def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
     obstacles = load_obstacles()
     draw_mode = st.session_state.draw_mode
@@ -146,7 +147,7 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
     """
     return html
 
-# -------------------------- 左侧布局 --------------------------
+# -------------------------- 左侧 --------------------------
 col_left, col_right = st.columns([1, 3])
 with col_left:
     st.markdown('<div class="left-panel">', unsafe_allow_html=True)
@@ -157,20 +158,20 @@ with col_left:
     if st.session_state.draw_mode:
         st.info("🔴 已开启障碍物选取模式")
     else:
-        st.warning("⚪ 未开启选取，地图只读")
+        st.warning("⚪ 未开启选取")
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------------- 右侧内容 --------------------------
+# -------------------------- 右侧 --------------------------
 with col_right:
     st.markdown("# 🎓 南京科技职业学院")
     st.markdown("## 无人机航线导航与监控系统")
 
     if page == "航线规划":
         map_switch = st.radio("🗺️ 地图模式", ["高德普通地图", "卫星影像地图"], horizontal=True)
-        
+
         st.markdown("### ⛰️ 飞行高度设置")
         fly_height = st.number_input("飞行高度（米）", min_value=1, value=50, step=1)
-        
+
         st.markdown("---")
         st.markdown("### 🎯 航线坐标")
         colA1, colA2 = st.columns(2)
@@ -187,51 +188,60 @@ with col_right:
 
         st.markdown("---")
         st.markdown("### 🚧 障碍物管理")
-        
-        col_draw, col_save = st.columns(2)
-        with col_draw:
+
+        # 按钮区
+        col1, col2 = st.columns(2)
+        with col1:
             if st.button("🔴 开启障碍物选取", type="primary", use_container_width=True):
                 st.session_state.draw_mode = True
                 st.rerun()
-        with col_save:
-            map_data = components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
-            obs_name = st.text_input("障碍物名称", placeholder="如：教学楼、塔吊")
-            save_disabled = not st.session_state.draw_mode or not (map_data and map_data.get("is_valid", False))
-            if st.button("✅ 保存当前障碍物", disabled=save_disabled, use_container_width=True):
-                if map_data and map_data.get("points"):
-                    add_obstacle(obs_name or "未命名障碍物", map_data["points"])
-                    st.session_state.draw_mode = False
-                    st.success("✅ 障碍物保存成功！")
-                    st.rerun()
+        with col2:
+            if st.button("⚪ 关闭选取模式", use_container_width=True):
+                st.session_state.draw_mode = False
+                st.rerun()
 
-        # 已保存障碍物 + 删除功能
+        # 地图必须单独渲染，不能放在按钮内部
+        st.session_state.map_data = components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
+
+        # 保存
+        obs_name = st.text_input("障碍物名称", placeholder="如：教学楼、塔吊")
+        md = st.session_state.map_data or {"points": [], "is_valid": False}
+        save_disabled = not st.session_state.draw_mode or not md.get("is_valid", False)
+
+        if st.button("✅ 保存障碍物", disabled=save_disabled, use_container_width=True):
+            if len(md.get("points", [])) >= 3:
+                add_obstacle(obs_name or "障碍物", md["points"])
+                st.success("保存成功！")
+                st.session_state.draw_mode = False
+                st.rerun()
+
+        # 已保存列表 + 删除
         st.markdown("#### 📋 已保存障碍物")
         obs_list = load_obstacles()
         if not obs_list:
-            st.info("暂无保存的障碍物")
+            st.info("暂无障碍物")
         else:
-            for idx, obs in enumerate(obs_list):
-                col_n, col_d = st.columns([4,1])
-                with col_n:
+            for i, obs in enumerate(obs_list):
+                c1, c2 = st.columns([4, 1])
+                with c1:
                     st.write(f"📍 {obs['name']}")
-                with col_d:
-                    if st.button("🗑️ 删除", key=f"del_{idx}", use_container_width=True):
-                        delete_obstacle(idx)
+                with c2:
+                    if st.button("🗑️ 删除", key=f"d{i}", use_container_width=True):
+                        delete_obstacle(i)
                         st.rerun()
 
-    # -------------------------- 飞行监控 --------------------------
     else:
-        st.title("📡 无人机通信心跳监测")
-        col_start, col_stop = st.columns(2)
-        with col_start:
+        st.title("📡 无人机心跳监控")
+        c1, c2 = st.columns(2)
+        with c1:
             if st.button("▶️ 开始监测"):
                 st.session_state.running = True
-        with col_stop:
+        with c2:
             if st.button("⏸️ 暂停监测"):
                 st.session_state.running = False
 
         placeholder = st.empty()
-        if st.session_state.get("running", False):
+        if st.session_state.running:
             while st.session_state.running:
                 st.session_state.seq += 1
                 t = datetime.datetime.now().strftime("%H:%M:%S")
@@ -240,6 +250,6 @@ with col_right:
                 })
                 df = pd.DataFrame(st.session_state.heartbeat_data)
                 with placeholder.container():
-                    st.line_chart(df, x="时间", y="序号", color="状态", height=300)
-                    st.dataframe(df, use_container_width=True, height=300)
+                    st.line_chart(df, x="时间", y="序号", color="状态")
+                    st.dataframe(df)
                 time.sleep(1)
