@@ -19,61 +19,51 @@ st.markdown("""
     border-radius: 10px;
     height: 100vh;
 }
-/* 坐标输入框样式 */
-.css-1n543ie {
-    min-width: 180px;
-}
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 地图核心（普通/卫星切换 + 南京科技职院精准坐标） --------------------------
-def map_html(latA, lngA, latB, lngB, map_type):
-    # 配置两种地图图层
-    if map_type == "卫星地图":
-        # 卫星图（ArcGIS，清晰度高）
-        layer_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{{z}}/{{y}}/{{x}}"
+# -------------------------- 地图核心（彻底修复语法+双模式） --------------------------
+def render_map(latA, lngA, latB, lngB, map_type):
+    # 1. 选择地图图层
+    if map_type == "卫星影像地图":
+        tile_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
     else:
-        # 普通街道图
-        layer_url = "https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png"
+        tile_url = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 
-    return f"""
+    # 2. 用字符串拼接彻底避免f-string语法错误
+    html = """
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="utf-8">
-        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
-        <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
-        <style>#map {{width:100%;height:680px;border-radius:10px;}}</style>
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>#map {width:100%;height:680px;border-radius:10px;}</style>
     </head>
     <body>
         <div id="map"></div>
         <script>
-            // 地图中心点：南京科技职业学院（确保在学校内）
+            // 初始化地图，中心点为南京科技职业学院
             var map = L.map('map').setView([32.2340, 118.7485], 17);
-
-            // 加载选中的地图
-            L.tileLayer('{layer_url}', {{
+            
+            // 加载地图图层
+            L.tileLayer('""" + tile_url + """', {
                 maxZoom: 20,
-                attribution: '© OpenStreetMap/ArcGIS'
-            }}).addTo(map);
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
 
-            // A点：南京科技职业学院内（精确修正，确保在校内）
-            var markerA = L.marker([32.2338, 118.7482]).addTo(map)
-                .bindPopup("✅ 起点A - 南京科技职业学院");
-                
-            // B点：南京科技职业学院内（精确修正）
-            var markerB = L.marker([32.2342, 118.7488]).addTo(map)
-                .bindPopup("✅ 终点B - 南京科技职业学院");
-
-            // 绘制航线（红色）
+            // 绘制A/B点和航线（使用传入的坐标）
+            L.marker([""" + str(latA) + """, """ + str(lngA) + """]).addTo(map).bindPopup("起点A");
+            L.marker([""" + str(latB) + """, """ + str(lngB) + """]).addTo(map).bindPopup("终点B");
             L.polyline([
-                [32.2338, 118.7482],
-                [32.2342, 118.7488]
-            ], {{color:"red", weight:6, opacity:0.9}}).addTo(map);
+                [""" + str(latA) + """, """ + str(lngA) + """],
+                [""" + str(latB) + """, """ + str(lngB) + """]
+            ], {color: 'red', weight: 5, opacity: 0.8}).addTo(map);
         </script>
     </body>
     </html>
     """
+    return html
 
 # -------------------------- 左侧布局（还原你的截图） --------------------------
 col_left, col_right = st.columns([1, 3])
@@ -109,7 +99,7 @@ with col_right:
         st.markdown("---")
         st.markdown("### ⚙️ 航线参数配置")
 
-        # A点输入（默认值已校准为学校内）
+        # A点输入（默认值校准为南京科技职业学院校内）
         colA1, colA2 = st.columns(2)
         with colA1:
             st.markdown("#### 起点 A")
@@ -118,7 +108,7 @@ with col_right:
             st.markdown("#### ")
             lngA = st.number_input("经度", value=118.7482, format="%.6f", step=0.0001, key="lngA")
 
-        # B点输入（默认值已校准为学校内）
+        # B点输入（默认值校准为南京科技职业学院校内）
         colB1, colB2 = st.columns(2)
         with colB1:
             st.markdown("#### 终点 B")
@@ -127,13 +117,12 @@ with col_right:
             st.markdown("#### ")
             lngB = st.number_input("经度 ", value=118.7488, format="%.6f", step=0.0001, key="lngB")
 
-        # 显示地图
-        components.html(map_html(latA, lngA, latB, lngB, map_switch), height=700)
+        # 渲染地图（100%显示）
+        components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
 
     else:
-        # 心跳监测页面（保持你的核心逻辑）
+        # 心跳监测页面
         st.title("📡 无人机通信心跳监测可视化")
-        st.markdown("### 南京科技职业学院 无人机项目")
 
         if "heartbeat_data" not in st.session_state:
             st.session_state.heartbeat_data = []
