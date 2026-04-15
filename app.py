@@ -11,7 +11,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# -------------------------- 样式还原截图 --------------------------
+# -------------------------- 样式 --------------------------
 st.markdown("""
 <style>
 .left-panel {
@@ -23,7 +23,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 核心：GCJ-02 转 WGS-84（解决坐标系偏移） --------------------------
+# -------------------------- 坐标转换（解决偏移） --------------------------
 def gcj_to_wgs(lat, lon):
     a = 6378245.0
     ee = 0.006693421622965943
@@ -51,23 +51,19 @@ def _transform_lon(x, y):
     ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图核心（高德普通图 + ArcGIS卫星图 + 坐标转换） --------------------------
+# -------------------------- 地图（高德+卫星） --------------------------
 def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
-    # 1. 坐标转换：GCJ-02 → WGS-84（卫星图用WGS，普通图用GCJ）
     if map_type == "卫星影像地图":
         latA, lngA = gcj_to_wgs(latA_gcj, lngA_gcj)
         latB, lngB = gcj_to_wgs(latB_gcj, lngB_gcj)
-        # 卫星图：ArcGIS高清航拍
         layer_url = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
         attribution = 'Tiles © Esri'
     else:
         latA, lngA = latA_gcj, lngA_gcj
         latB, lngB = latB_gcj, lngB_gcj
-        # 普通图：高德地图（国内最稳，无密钥）
         layer_url = "https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
         attribution = '© 高德地图'
 
-    # 2. 字符串拼接彻底避免f-string语法错误
     html = """
     <!DOCTYPE html>
     <html>
@@ -80,120 +76,100 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
     <body>
         <div id="map"></div>
         <script>
-            // 地图中心点：南京科技职业学院红圈内部（精准校准）
             var map = L.map('map').setView([32.2335, 118.7475], 17);
-            
-            // 加载选中的地图图层
-            L.tileLayer('""" + layer_url + """', {
-                maxZoom: 20,
-                attribution: '""" + attribution + """'
-            }).addTo(map);
-
-            // A点：南京科技职业学院红圈内部（100%在校内）
-            L.marker([""" + str(latA) + """, """ + str(lngA) + """]).addTo(map)
-                .bindPopup("✅ 起点A - 南科院校内");
-                
-            // B点：南京科技职业学院红圈内部
-            L.marker([""" + str(latB) + """, """ + str(lngB) + """]).addTo(map)
-                .bindPopup("✅ 终点B - 南科院校内");
-
-            // 红色航线
-            L.polyline([
-                [""" + str(latA) + """, """ + str(lngA) + """],
-                [""" + str(latB) + """, """ + str(lngB) + """]
-            ], {color:"red", weight:5, opacity:0.8}).addTo(map);
+            L.tileLayer('""" + layer_url + """', {maxZoom:20,attribution:'""" + attribution + """'}).addTo(map);
+            L.marker([""" + str(latA) + """, """ + str(lngA) + """]).addTo(map).bindPopup("起点A");
+            L.marker([""" + str(latB) + """, """ + str(lngB) + """]).addTo(map).bindPopup("终点B");
+            L.polyline([[""" + str(latA) + """,""" + str(lngA) + """],[""" + str(latB) + """,""" + str(lngB) + """]],{color:'red',weight:5}).addTo(map);
         </script>
     </body>
     </html>
     """
     return html
 
-# -------------------------- 左侧布局（还原你的截图） --------------------------
+# -------------------------- 左侧面板 --------------------------
 col_left, col_right = st.columns([1, 3])
 
 with col_left:
     st.markdown('<div class="left-panel">', unsafe_allow_html=True)
-
     st.subheader("🧭 导航")
     page = st.radio("", ["航线规划", "飞行监控"], index=0, label_visibility="collapsed")
-
     st.divider()
-
     st.subheader("⚙️ 坐标系设置")
     coord_type = st.radio("", ["WGS-84", "GCJ-02(高德/百度)"], index=1, label_visibility="collapsed")
-
     st.divider()
-
     st.subheader("📊 系统状态")
     st.success("✅ A点已设")
     st.success("✅ B点已设")
-
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------------- 右侧内容 --------------------------
+# -------------------------- 右侧 --------------------------
 with col_right:
     st.markdown("# 🎓 南京科技职业学院")
     st.markdown("### 无人机航线导航与监控系统")
 
     if page == "航线规划":
-        # 地图模式切换（高德普通图 / ArcGIS卫星图）
         map_switch = st.radio("🗺️ 地图模式", ["高德普通地图", "卫星影像地图"], horizontal=True)
-
         st.markdown("---")
         st.markdown("### ⚙️ 航线参数配置")
 
-        # ✅ A/B点：精准校准到南京科技职业学院红圈内部（GCJ-02坐标）
         colA1, colA2 = st.columns(2)
         with colA1:
             st.markdown("#### 起点 A")
-            latA = st.number_input("纬度", value=32.2335, format="%.6f", step=0.0001, key="latA")
+            latA = st.number_input("纬度", value=32.2335, format="%.6f")
         with colA2:
             st.markdown("#### ")
-            lngA = st.number_input("经度", value=118.7475, format="%.6f", step=0.0001, key="lngA")
+            lngA = st.number_input("经度", value=118.7475, format="%.6f")
 
         colB1, colB2 = st.columns(2)
         with colB1:
             st.markdown("#### 终点 B")
-            latB = st.number_input("纬度 ", value=32.2338, format="%.6f", step=0.0001, key="latB")
+            latB = st.number_input("纬度 ", value=32.2338, format="%.6f")
         with colB2:
             st.markdown("#### ")
-            lngB = st.number_input("经度 ", value=118.7479, format="%.6f", step=0.0001, key="lngB")
+            lngB = st.number_input("经度 ", value=118.7479, format="%.6f")
 
-        # 渲染地图（100%显示，坐标在校内）
         components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
 
+    # -------------------------- 心跳监测（新增暂停键） --------------------------
     else:
-        # 心跳监测页面
         st.title("📡 无人机通信心跳监测可视化")
 
+        # 初始化状态
         if "heartbeat_data" not in st.session_state:
             st.session_state.heartbeat_data = []
             st.session_state.seq = 0
             st.session_state.last_receive_time = time.time()
+            st.session_state.running = False  # 运行状态
+
+        col_start, col_stop = st.columns(2)
+        with col_start:
+            if st.button("▶️ 开始监测"):
+                st.session_state.running = True
+        with col_stop:
+            if st.button("⏸️ 暂停监测"):
+                st.session_state.running = False
+                st.info("监测已暂停")
 
         def simulate_heartbeat():
             st.session_state.seq += 1
             t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             st.session_state.last_receive_time = time.time()
             st.session_state.heartbeat_data.append({
-                "seq": st.session_state.seq,
-                "time": t,
-                "status": "received"
+                "seq": st.session_state.seq, "time": t, "status": "received"
             })
 
         def check_timeout():
             if time.time() - st.session_state.last_receive_time > 3:
                 t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 st.session_state.heartbeat_data.append({
-                    "seq": st.session_state.seq,
-                    "time": t,
-                    "status": "timeout"
+                    "seq": st.session_state.seq, "time": t, "status": "timeout"
                 })
                 st.warning("⚠️ 连接超时！3秒未收到心跳包！")
 
-        if st.button("▶️ 开始监测"):
-            placeholder = st.empty()
-            while True:
+        placeholder = st.empty()
+        if st.session_state.running:
+            while st.session_state.running:
                 simulate_heartbeat()
                 check_timeout()
                 df = pd.DataFrame(st.session_state.heartbeat_data)
