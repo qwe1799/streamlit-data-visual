@@ -5,6 +5,7 @@ import time
 import datetime
 import json
 import os
+import math  # 这里补上！修复报错！
 
 # -------------------------- 页面配置 --------------------------
 st.set_page_config(
@@ -24,7 +25,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 障碍物持久化（核心：JSON永久存储） --------------------------
+# -------------------------- 障碍物持久化 --------------------------
 OBSTACLE_FILE = "obstacles.json"
 
 def load_obstacles():
@@ -44,7 +45,7 @@ if "current_points" not in st.session_state:
     st.session_state.current_points = []
 if "save_flag" not in st.session_state:
     st.session_state.save_flag = False
-# 心跳监控状态（完整保留）
+
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
@@ -68,14 +69,14 @@ def _transform_lat(x, y):
     ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
     ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y / 30.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y * 3.1415926 / 30.0)) * 2.0 / 3.0
     return ret
 
 def _transform_lon(x, y):
     ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
     ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x * 3.1415926 / 30.0)) * 2.0 / 3.0
     return ret
 
 # -------------------------- 地图渲染 --------------------------
@@ -110,12 +111,10 @@ def render_map(latA, lngA, latB, lngB, map_type):
             var map = L.map('map').setView([32.2335, 118.7475], 17);
             L.tileLayer('{layer}', {{maxZoom:20, attribution:'{attr}'}}).addTo(map);
 
-            // 绘制航线
             L.polyline([[{latA},{lngA}],[{latB},{lngB}]], {{color:'red',weight:4}}).addTo(map);
             L.marker([{latA},{lngA}]).bindPopup("起点").addTo(map);
             L.marker([{latB},{lngB}]).bindPopup("终点").addTo(map);
 
-            // 绘制已保存障碍物（红色半透明，永久显示）
             const obs = {json.dumps(obstacles)};
             obs.forEach(o => {{
                 L.polygon(o.points, {{color:'#f00',fillColor:'#f44',fillOpacity:0.3}})
@@ -161,7 +160,6 @@ with col_left:
         height = st.number_input("高度(m)", min_value=1, max_value=500, value=25, step=1)
         name = st.text_input("名称", value="教学楼")
 
-        # 绘制控制按钮
         if not st.session_state.drawing:
             if st.button("🔴 开始圈选障碍物", type="primary", use_container_width=True):
                 st.session_state.drawing = True
@@ -220,12 +218,13 @@ with col_right:
             latB = st.number_input("终点纬度", value=32.2338, format="%.6f")
             lngB = st.number_input("终点经度", value=118.7479, format="%.6f")
 
-        # 渲染地图，同步点集
-        map_res = components.html(render_map(latA, lngA, latB, lngB, map_type), height=680)
-        if isinstance(map_res, list) and st.session_state.drawing:
-            st.session_state.current_points = map_res
+        try:
+            map_res = components.html(render_map(latA, lngA, latB, lngB, map_type), height=680)
+            if isinstance(map_res, list) and st.session_state.drawing:
+                st.session_state.current_points = map_res
+        except:
+            st.error("地图加载异常，请切换地图模式重试")
 
-        # 保存逻辑（地图渲染后执行，确保拿到完整点集）
         if st.session_state.save_flag and len(st.session_state.current_points) > 0:
             all_obs = load_obstacles()
             all_obs.append({
@@ -240,7 +239,6 @@ with col_right:
             st.rerun()
 
     else:
-        # -------------------------- 完整保留心跳监控功能 --------------------------
         st.title("📡 无人机心跳监控")
         c1, c2 = st.columns(2)
         with c1:
