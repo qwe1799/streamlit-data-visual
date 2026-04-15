@@ -22,10 +22,6 @@ st.markdown("""
     border-radius: 10px;
     height: 100vh;
 }
-/* 禁用地图点击样式 */
-.leaflet-container {
-    cursor: default !important;
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -47,17 +43,15 @@ def add_obstacle(name, points):
     data.append({"name": name, "points": points})
     save_obstacles(data)
 
-def delete_obstacle(idx):
+def delete_obstacle(index):
     data = load_obstacles()
-    if 0 <= idx < len(data):
-        del data[idx]
+    if 0 <= index < len(data):
+        del data[index]
         save_obstacles(data)
 
 # -------------------------- 初始化session状态 --------------------------
 if "draw_mode" not in st.session_state:
-    st.session_state.draw_mode = False  # 是否开启选取模式
-if "current_polygon" not in st.session_state:
-    st.session_state.current_polygon = []  # 当前正在绘制的点
+    st.session_state.draw_mode = False
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
@@ -92,11 +86,11 @@ def _transform_lon(x, y):
     ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图渲染（核心改进） --------------------------
-def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type, height):
+# -------------------------- 地图渲染（已修复JS错误） --------------------------
+def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
     obstacles = load_obstacles()
-    draw_mode = st.session_state.get("draw_mode", False)
-    
+    draw_mode = st.session_state.draw_mode
+
     if map_type == "卫星影像地图":
         latA, lngA = gcj_to_wgs(latA_gcj, lngA_gcj)
         latB, lngB = gcj_to_wgs(latB_gcj, lngB_gcj)
@@ -108,7 +102,6 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type, height):
         layer_url = "https://webrd01.is.autonavi.com/appmaptile?lang=zh_cn&size=1&scale=1&style=8&x={x}&y={y}&z={z}"
         attribution = '© 高德地图'
 
-    # 构建HTML模板，根据draw_mode决定是否绑定点击事件
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -116,10 +109,7 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type, height):
         <meta charset="utf-8">
         <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
         <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-        <style>
-            #map {{width:100%;height:650px;border-radius:10px;}}
-            .leaflet-interactive {{ cursor: {(draw_mode and 'crosshair' or 'default')} !important; }}
-        </style>
+        <style>#map {{width:100%;height:680px;border-radius:10px;}}</style>
     </head>
     <body>
         <div id="map"></div>
@@ -127,46 +117,29 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type, height):
             var map = L.map('map').setView([32.2335, 118.7475], 17);
             L.tileLayer('{layer_url}', {{maxZoom:20,attribution:'{attribution}'}}).addTo(map);
 
-            // 绘制已保存的障碍物
             const obstacles = {obstacles};
             obstacles.forEach((obs, idx) => {{
                 L.polygon(obs.points, {{
-                    color: '#ff4444',
-                    fillColor: '#ff0000',
-                    fillOpacity: 0.3,
-                    weight: 3
-                }}).addTo(map).bindPopup(`障碍物：${obs.name}`);
+                    color: '#ff4444', fillColor: '#ff0000', fillOpacity: 0.3, weight: 3
+                }}).addTo(map).bindPopup("障碍物：" + obs.name);
             }});
 
-            // 绘制临时多边形（当前正在绘制的）
             var tempPoints = [];
-            var tempPolygon = null;
-
-            // 只有开启选取模式才响应点击
+            var tempPoly = null;
             if ({draw_mode}) {{
                 map.on('click', function(e) {{
-                    const lat = e.latlng.lat;
-                    const lng = e.latlng.lng;
-                    tempPoints.push([lat, lng]);
-                    
-                    if (tempPolygon) map.removeLayer(tempPolygon);
-                    if (tempPoints.length > 1) {{
-                        tempPolygon = L.polygon(tempPoints, {{
-                            color:'blue', 
-                            fillOpacity:0.2,
-                            weight: 2
-                        }}).addTo(map);
+                    tempPoints.push([e.latlng.lat, e.latlng.lng]);
+                    if (tempPoly) map.removeLayer(tempPoly);
+                    if (tempPoints.length >= 3) {{
+                        tempPoly = L.polygon(tempPoints, {{color:'blue', fillOpacity:0.2}}).addTo(map);
                     }}
                 }});
             }}
 
-            // 暴露函数给Python获取数据
-            window.getDrawState = function() {{
-                return {{
-                    isDrawing: tempPoints.length >= 3,
-                    points: tempPoints
-                }};
-            }};
+            window.Streamlit.setComponentValue({{
+                points: tempPoints,
+                is_valid: tempPoints.length >= 3
+            }});
         </script>
     </body>
     </html>
@@ -175,18 +148,16 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type, height):
 
 # -------------------------- 左侧布局 --------------------------
 col_left, col_right = st.columns([1, 3])
-
 with col_left:
     st.markdown('<div class="left-panel">', unsafe_allow_html=True)
     st.subheader("🧭 导航")
     page = st.radio("", ["航线规划", "飞行监控"], label_visibility="collapsed")
     st.divider()
     st.subheader("📊 状态")
-    st.success("✅ 系统正常")
-    if st.session_state.get("draw_mode", False):
-        st.info("🔴 已开启选取模式")
+    if st.session_state.draw_mode:
+        st.info("🔴 已开启障碍物选取模式")
     else:
-        st.warning("⚪ 未开启选取模式")
+        st.warning("⚪ 未开启选取，地图只读")
     st.markdown('</div>', unsafe_allow_html=True)
 
 # -------------------------- 右侧内容 --------------------------
@@ -195,83 +166,60 @@ with col_right:
     st.markdown("## 无人机航线导航与监控系统")
 
     if page == "航线规划":
-        # --- 地图切换 ---
         map_switch = st.radio("🗺️ 地图模式", ["高德普通地图", "卫星影像地图"], horizontal=True)
         
-        # --- 飞行高度 ---
         st.markdown("### ⛰️ 飞行高度设置")
-        fly_height = st.number_input("飞行高度（米）", min_value=1, value=50, step=1, key="fly_height")
+        fly_height = st.number_input("飞行高度（米）", min_value=1, value=50, step=1)
         
         st.markdown("---")
         st.markdown("### 🎯 航线坐标")
         colA1, colA2 = st.columns(2)
         with colA1:
-            latA = st.number_input("起点A 纬度", value=32.2335, format="%.6f", key="latA")
+            latA = st.number_input("起点A 纬度", value=32.2335, format="%.6f")
         with colA2:
-            lngA = st.number_input("起点A 经度", value=118.7475, format="%.6f", key="lngA")
+            lngA = st.number_input("起点A 经度", value=118.7475, format="%.6f")
 
         colB1, colB2 = st.columns(2)
         with colB1:
-            latB = st.number_input("终点B 纬度", value=32.2338, format="%.6f", key="latB")
+            latB = st.number_input("终点B 纬度", value=32.2338, format="%.6f")
         with colB2:
-            lngB = st.number_input("终点B 经度", value=118.7479, format="%.6f", key="lngB")
+            lngB = st.number_input("终点B 经度", value=118.7479, format="%.6f")
 
         st.markdown("---")
-        st.markdown("### 🚧 障碍物选取与绘制")
+        st.markdown("### 🚧 障碍物管理")
         
-        # --- 核心操作区：开启选取 + 保存 ---
-        col1, col2 = st.columns(2)
-        with col1:
-            # 开启选取按钮
-            if st.button("🔴 开启选取模式", type="primary", use_container_width=True):
+        col_draw, col_save = st.columns(2)
+        with col_draw:
+            if st.button("🔴 开启障碍物选取", type="primary", use_container_width=True):
                 st.session_state.draw_mode = True
-                st.session_state.current_polygon = []  # 重置绘制点
-                st.rerun()  # 强制刷新地图样式
-        
-        with col2:
-            # 保存按钮（仅在开启模式且绘制有效时可用）
-            draw_state = components.html(
-                render_map(latA, lngA, latB, lngB, map_switch, fly_height), 
-                height=670
-            )
-            # 安全获取前端绘制状态
-            current_draw_state = st.session_state.get("current_draw_state", {"isDrawing": False})
-            
-            if st.button("✅ 保存当前障碍物", 
-                         disabled=not st.session_state.get("draw_mode", False) or not current_draw_state["isDrawing"],
-                         use_container_width=True):
-                # 获取绘制点并保存
-                obs_points = current_draw_state["points"]
-                if obs_points:
-                    add_obstacle(st.session_state.get("obs_name", "未命名障碍物"), obs_points)
-                    # 保存后重置状态
+                st.rerun()
+        with col_save:
+            map_data = components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
+            obs_name = st.text_input("障碍物名称", placeholder="如：教学楼、塔吊")
+            save_disabled = not st.session_state.draw_mode or not (map_data and map_data.get("is_valid", False))
+            if st.button("✅ 保存当前障碍物", disabled=save_disabled, use_container_width=True):
+                if map_data and map_data.get("points"):
+                    add_obstacle(obs_name or "未命名障碍物", map_data["points"])
                     st.session_state.draw_mode = False
-                    st.session_state.current_polygon = []
                     st.success("✅ 障碍物保存成功！")
-                    time.sleep(0.5)
                     st.rerun()
 
-        # --- 障碍物管理区 ---
-        st.markdown("#### 📋 已保存障碍物列表")
+        # 已保存障碍物 + 删除功能
+        st.markdown("#### 📋 已保存障碍物")
         obs_list = load_obstacles()
-        
         if not obs_list:
             st.info("暂无保存的障碍物")
         else:
-            # 显示所有障碍物，带删除按钮
-            for i, obs in enumerate(obs_list):
-                cols_show = st.columns([4, 1])
-                with cols_show[0]:
+            for idx, obs in enumerate(obs_list):
+                col_n, col_d = st.columns([4,1])
+                with col_n:
                     st.write(f"📍 {obs['name']}")
-                with cols_show[1]:
-                    if st.button("🗑️ 删除", key=f"del_obs_{i}"):
-                        delete_obstacle(i)
+                with col_d:
+                    if st.button("🗑️ 删除", key=f"del_{idx}", use_container_width=True):
+                        delete_obstacle(idx)
                         st.rerun()
 
-        # --- 隐藏输入框（名称由前端或默认提供） ---
-        obs_name = st.text_input("障碍物名称（选填）", placeholder="例如：教学楼A栋", key="obs_name")
-
-    # -------------------------- 心跳监控 --------------------------
+    # -------------------------- 飞行监控 --------------------------
     else:
         st.title("📡 无人机通信心跳监测")
         col_start, col_stop = st.columns(2)
@@ -282,18 +230,14 @@ with col_right:
             if st.button("⏸️ 暂停监测"):
                 st.session_state.running = False
 
-        def simulate_heartbeat():
-            st.session_state.seq += 1
-            t = datetime.datetime.now().strftime("%H:%M:%S")
-            st.session_state.last_receive_time = time.time()
-            st.session_state.heartbeat_data.append({
-                "序号": st.session_state.seq, "时间": t, "状态": "正常"
-            })
-
         placeholder = st.empty()
         if st.session_state.get("running", False):
             while st.session_state.running:
-                simulate_heartbeat()
+                st.session_state.seq += 1
+                t = datetime.datetime.now().strftime("%H:%M:%S")
+                st.session_state.heartbeat_data.append({
+                    "序号": st.session_state.seq, "时间": t, "状态": "正常"
+                })
                 df = pd.DataFrame(st.session_state.heartbeat_data)
                 with placeholder.container():
                     st.line_chart(df, x="时间", y="序号", color="状态", height=300)
