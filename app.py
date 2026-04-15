@@ -38,7 +38,9 @@ def save_obstacles(obs_list):
     with open(OBSTACLE_FILE, 'w', encoding='utf-8') as f:
         json.dump(obs_list, f, ensure_ascii=False, indent=2)
 
-# -------------------------- 初始化状态 --------------------------
+# -------------------------- 初始化状态（核心：新增选取模式） --------------------------
+if "select_mode" not in st.session_state:
+    st.session_state.select_mode = False  # False: 未开启选取, True: 正在选取
 if "current_points" not in st.session_state:
     st.session_state.current_points = []
 if "heartbeat_data" not in st.session_state:
@@ -64,18 +66,20 @@ def _transform_lat(x, y):
     ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
     ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
-    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y / 30.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y * math.pi / 30.0)) * 2.0 / 3.0
     return ret
 
 def _transform_lon(x, y):
     ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
+    ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
     ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
     ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图渲染（终极修复版） --------------------------
+# -------------------------- 地图渲染（核心：一键选取逻辑） --------------------------
 def render_map(latA, lngA, latB, lngB, map_type):
     obstacles = load_obstacles()
+    select_mode = st.session_state.select_mode
     points = st.session_state.current_points
 
     if map_type == "卫星影像地图":
@@ -104,12 +108,12 @@ def render_map(latA, lngA, latB, lngB, map_type):
             var map = L.map('map').setView([32.2335, 118.7475], 17);
             L.tileLayer('{layer_url}', {{maxZoom:20,attribution:'{attribution}'}}).addTo(map);
 
-            // 航线
+            // 绘制航线
             L.polyline([[{latA},{lngA}],[{latB},{lngB}]], {{color:'red', weight:5}}).addTo(map);
             L.marker([{latA},{lngA}]).addTo(map).bindPopup("起点A");
             L.marker([{latB},{lngB}]).addTo(map).bindPopup("终点B");
 
-            // 已保存障碍物
+            // 绘制已保存障碍物
             const obstacles = {json.dumps(obstacles)};
             obstacles.forEach(obs => {{
                 L.polygon(obs.points, {{
@@ -121,26 +125,30 @@ def render_map(latA, lngA, latB, lngB, map_type):
             var tempPoints = {points_json};
             var tempPoly = null;
 
-            function updateUI() {{
+            // 绘制临时多边形
+            function drawTemp() {{
                 if (tempPoly) map.removeLayer(tempPoly);
                 if (tempPoints.length > 1) {{
                     tempPoly = L.polygon(tempPoints, {{color:'blue', fillOpacity:0.2}}).addTo(map);
                 }}
-                // 🔥 关键：每次点击都强制回传，确保Python能拿到数据
-                window.Streamlit.setComponentValue(tempPoints);
             }}
+            drawTemp();
 
-            map.on('click', function(e) {{
-                tempPoints.push([e.latlng.lat, e.latlng.lng]);
-                updateUI();
-            }});
+            // 仅在选取模式下响应点击
+            if ({select_mode}) {{
+                map.on('click', function(e) {{
+                    tempPoints.push([e.latlng.lat, e.latlng.lng]);
+                    drawTemp();
+                    window.Streamlit.setComponentValue(tempPoints);
+                }});
+            }}
         </script>
     </body>
     </html>
     """
     return html
 
-# -------------------------- 布局 --------------------------
+# -------------------------- 左侧布局 --------------------------
 col_left, col_right = st.columns([1, 3])
 
 with col_left:
@@ -150,62 +158,70 @@ with col_left:
     st.divider()
     
     if page == "航线规划":
-        st.markdown("### 🚧 圈选障碍物（点击地图）")
-        # 实时刷新数量
-        st.write(f"已打点：{len(st.session_state.current_points)}")
+        st.markdown("### 🚧 障碍物选取")
         
-        # 高度和名称
-        obs_height = st.number_input("高度(m)", min_value=1, value=25, step=1)
-        obs_name = st.text_input("名称", value="教学楼")
-        
-        # 保存按钮
-        if st.button("✅ 保存障碍物", use_container_width=True):
-            # 直接检查session状态，不依赖组件返回
-            if len(st.session_state.current_points) >= 3:
-                lst = load_obstacles()
-                lst.append({
-                    "name": obs_name,
-                    "height": obs_height,
-                    "points": st.session_state.current_points
-                })
-                save_obstacles(lst)
-                # 保存后清空并刷新
+        # 核心：一键开启/结束选取
+        if not st.session_state.select_mode:
+            if st.button("🔴 开始选取障碍物", type="primary", use_container_width=True):
+                st.session_state.select_mode = True
                 st.session_state.current_points = []
-                st.success("✅ 保存成功！")
-                time.sleep(0.5)
                 st.rerun()
-            else:
-                st.warning("⚠️ 至少需要点击3个点！")
+        else:
+            if st.button("✅ 结束选取并保存", type="primary", use_container_width=True):
+                # 彻底删除打点限制，直接保存
+                if len(st.session_state.current_points) >= 1:  # 仅需1个点即可保存（可改）
+                    lst = load_obstacles()
+                    lst.append({
+                        "name": st.session_state.get("obs_name", "未命名"),
+                        "height": st.session_state.get("obs_height", 25),
+                        "points": st.session_state.current_points
+                    })
+                    save_obstacles(lst)
+                    st.session_state.select_mode = False
+                    st.session_state.current_points = []
+                    st.success("✅ 障碍物保存成功！")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ 请至少点击1个点！")
+            if st.button("❌ 取消选取", use_container_width=True):
+                st.session_state.select_mode = False
+                st.session_state.current_points = []
+                st.rerun()
         
-        # 清空按钮
-        if st.button("❌ 清空打点", use_container_width=True):
-            st.session_state.current_points = []
-            st.rerun()
+        # 高度和名称（仅在选取模式下显示）
+        if st.session_state.select_mode:
+            st.write(f"已打点：{len(st.session_state.current_points)}")
+            obs_height = st.number_input("高度(m)", min_value=1, value=25, step=1, key="obs_height")
+            obs_name = st.text_input("名称", value="教学楼", key="obs_name")
+        
+        # 清空当前打点（仅在选取模式下显示）
+        if st.session_state.select_mode:
+            if st.button("🗑️ 清空当前打点", use_container_width=True):
+                st.session_state.current_points = []
+                st.rerun()
         
         st.divider()
         st.markdown("### 📋 已保存障碍物")
         obs_list = load_obstacles()
         if obs_list:
-            options = [f"{i+1}. {o['name']} ({o['height']}m)" for i,o in enumerate(obs_list)]
-            selected = st.selectbox("", options, label_visibility="collapsed")
-            idx = int(selected.split(".")[0]) - 1
-            
-            col_del, col_clear = st.columns(2)
-            with col_del:
-                if st.button("🗑️ 删除选中", use_container_width=True):
-                    del obs_list[idx]
-                    save_obstacles(obs_list)
-                    st.rerun()
-            with col_clear:
-                if st.button("🧹 清空全部", use_container_width=True):
-                    save_obstacles([])
-                    st.rerun()
+            for i, obs in enumerate(obs_list):
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    st.write(f"📍 {obs['name']} ({obs['height']}m)")
+                with col2:
+                    if st.button("删除", key=f"del_{i}", use_container_width=True):
+                        del obs_list[i]
+                        save_obstacles(obs_list)
+                        st.rerun()
+            if st.button("🧹 清空全部障碍物", use_container_width=True):
+                save_obstacles([])
+                st.rerun()
         else:
-            st.info("暂无障碍物")
+            st.info("暂无保存的障碍物")
             
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------------- 右侧 --------------------------
+# -------------------------- 右侧布局 --------------------------
 with col_right:
     st.markdown("# 🎓 南京科技职业学院")
     st.markdown("## 无人机航线导航与监控系统")
@@ -224,15 +240,14 @@ with col_right:
             latB = st.number_input("终点B 纬度", value=32.2338, format="%.6f")
             lngB = st.number_input("终点B 经度", value=118.7479, format="%.6f")
         
-        # 🔥 最终修复：用 try 包裹，确保地图渲染
+        # 安全渲染地图
         try:
             map_res = components.html(render_map(latA, lngA, latB, lngB, map_switch), height=680)
-            # 安全更新坐标
-            if isinstance(map_res, list):
+            if isinstance(map_res, list) and st.session_state.select_mode:
                 st.session_state.current_points = map_res
-        except Exception as e:
-            # 报错时降级渲染，不影响核心功能
-            st.error("地图组件异常，尝试刷新页面。")
+        except:
+            pass
+
     else:
         st.title("📡 无人机心跳监控")
         c1,c2 = st.columns(2)
