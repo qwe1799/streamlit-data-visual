@@ -87,23 +87,37 @@ def render_map(latA_gcj, lngA_gcj, latB_gcj, lngB_gcj, map_type):
     """
     return html
 
-# -------------------------- 左侧面板 --------------------------
+# -------------------------- 初始化所有状态（彻底解决AttributeError） --------------------------
+if "heartbeat_data" not in st.session_state:
+    st.session_state.heartbeat_data = []
+    st.session_state.seq = 0
+    st.session_state.last_receive_time = time.time()
+    st.session_state.running = False  # 必须提前初始化，避免报错
+
+# -------------------------- 左侧布局（隐藏坐标系设置） --------------------------
 col_left, col_right = st.columns([1, 3])
 
 with col_left:
     st.markdown('<div class="left-panel">', unsafe_allow_html=True)
+
     st.subheader("🧭 导航")
     page = st.radio("", ["航线规划", "飞行监控"], index=0, label_visibility="collapsed")
+
     st.divider()
-    st.subheader("⚙️ 坐标系设置")
-    coord_type = st.radio("", ["WGS-84", "GCJ-02(高德/百度)"], index=1, label_visibility="collapsed")
-    st.divider()
+
+    # ✅ 彻底隐藏坐标系设置模块（你不想要的部分）
+    # st.subheader("⚙️ 坐标系设置")
+    # coord_type = st.radio("", ["WGS-84", "GCJ-02(高德/百度)"], index=1, label_visibility="collapsed")
+
+    # st.divider()
+
     st.subheader("📊 系统状态")
     st.success("✅ A点已设")
     st.success("✅ B点已设")
+
     st.markdown('</div>', unsafe_allow_html=True)
 
-# -------------------------- 右侧 --------------------------
+# -------------------------- 右侧内容 --------------------------
 with col_right:
     st.markdown("# 🎓 南京科技职业学院")
     st.markdown("### 无人机航线导航与监控系统")
@@ -131,16 +145,9 @@ with col_right:
 
         components.html(render_map(latA, lngA, latB, lngB, map_switch), height=700)
 
-    # -------------------------- 心跳监测（新增暂停键） --------------------------
+    # -------------------------- 心跳监测（含暂停键，零报错） --------------------------
     else:
         st.title("📡 无人机通信心跳监测可视化")
-
-        # 初始化状态
-        if "heartbeat_data" not in st.session_state:
-            st.session_state.heartbeat_data = []
-            st.session_state.seq = 0
-            st.session_state.last_receive_time = time.time()
-            st.session_state.running = False  # 运行状态
 
         col_start, col_stop = st.columns(2)
         with col_start:
@@ -168,7 +175,8 @@ with col_right:
                 st.warning("⚠️ 连接超时！3秒未收到心跳包！")
 
         placeholder = st.empty()
-        if st.session_state.running:
+        # ✅ 安全判断：先检查key是否存在，再访问
+        if st.session_state.get("running", False):
             while st.session_state.running:
                 simulate_heartbeat()
                 check_timeout()
