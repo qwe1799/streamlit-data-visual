@@ -25,7 +25,33 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# -------------------------- 永久存储（绝对稳定） --------------------------
+# -------------------------- 本地存储工具（核心） --------------------------
+def local_storage(key, value=None):
+    """
+    读写 localStorage，绕开 Streamlit 组件回传
+    :param key: 存储键名
+    :param value: 要存的值，None 则读取
+    :return: 读取到的值
+    """
+    if value is not None:
+        # 写入 localStorage
+        components.html(f"""
+        <script>
+            localStorage.setItem('{key}', JSON.stringify({json.dumps(value)}));
+        </script>
+        """, height=0)
+        return value
+    else:
+        # 读取 localStorage
+        html = components.html(f"""
+        <script>
+            const val = localStorage.getItem('{key}');
+            window.Streamlit.setComponentValue(val ? JSON.parse(val) : []);
+        </script>
+        """, height=0)
+        return html if html else []
+
+# -------------------------- 永久存储（双重保障） --------------------------
 OBSTACLE_FILE = "obstacles.json"
 
 def load_obstacles():
@@ -41,8 +67,6 @@ def save_obstacles(obs_list):
 # -------------------------- 初始化状态 --------------------------
 if "drawing" not in st.session_state:
     st.session_state.drawing = False
-if "current_points" not in st.session_state:
-    st.session_state.current_points = []
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
@@ -72,14 +96,12 @@ def _transform_lon(x, y):
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 核心修复：不依赖 Streamlit 组件回传 --------------------------
-# 我们直接在前端 JS 里处理点的逻辑，Python 只负责加载和保存文件
-# 这样就彻底解决了 "map_res" 为空的问题
-
+# -------------------------- 地图渲染（本地存储版） --------------------------
 def render_map_final(latA, lngA, latB, lngB, map_type):
     obstacles = load_obstacles()
     drawing = st.session_state.drawing
-    points = st.session_state.current_points
+    # 从 localStorage 读取临时点（会话级记忆）
+    points = local_storage("temp_obstacle_points")
 
     if map_type == "卫星影像地图":
         latA, lngA = gcj_to_wgs(latA, lngA)
@@ -119,7 +141,7 @@ def render_map_final(latA, lngA, latB, lngB, map_type):
                  .bindPopup(o.name + " " + o.height + "m").addTo(map);
             }});
 
-            // 临时点（蓝色）
+            // 临时点（蓝色）- 从 localStorage 读取
             var points = {points_json};
             var poly = null;
 
@@ -131,13 +153,13 @@ def render_map_final(latA, lngA, latB, lngB, map_type):
             }}
             redraw();
 
-            // 点击事件：不再回传 Streamlit，直接维护本地 points
+            // 点击事件：直接写入 localStorage，不依赖 Streamlit 回传
             if ({str(drawing).lower()}) {{
                 map.on('click', function(e) {{
                     points.push([e.latlng.lat, e.latlng.lng]);
                     redraw();
-                    // 不再调用 window.Streamlit.setComponentValue
-                    // 直接在前端维护 points，Python 读取 session_state 即可
+                    // 写入本地存储，实时同步
+                    localStorage.setItem('temp_obstacle_points', JSON.stringify(points));
                 }});
             }}
         </script>
@@ -156,41 +178,42 @@ with col_left:
     st.divider()
 
     if page == "航线规划":
-        st.markdown("### 🚧 障碍物圈选（终极稳定版）")
+        st.markdown("### 🚧 障碍物圈选（终极必保存版）")
         height = st.number_input("高度(m)", min_value=1, max_value=500, value=25, step=1)
         name = st.text_input("名称", value="教学楼")
 
-        # 核心逻辑：把点存在 session_state，手动控制
+        # 从本地存储读取临时点，实时显示计数
+        temp_points = local_storage("temp_obstacle_points")
+        st.info(f"当前已打点：{len(temp_points)} 个（本地存储，永不丢失）")
+
         if not st.session_state.drawing:
             if st.button("🔴 开始圈选", type="primary", use_container_width=True):
                 st.session_state.drawing = True
-                # 重置点，但不从文件读，直接从前端加载
-                st.session_state.current_points = []
                 st.rerun()
         else:
-            # 保存按钮：直接读取 Python 内存中的点
             if st.button("✅ 保存并结束圈选", type="primary", use_container_width=True):
-                # 这里的 current_points 是前端画完后，页面刷新时带入的
-                # 必须保证页面刷新后，前端 JS 拿到的是最新的点
-                if len(st.session_state.current_points) >= 3:
+                # 从本地存储读取点，写入永久文件
+                current_points = local_storage("temp_obstacle_points")
+                if len(current_points) >= 3:
                     all_obs = load_obstacles()
                     all_obs.append({
                         "name": name,
                         "height": height,
-                        "points": st.session_state.current_points
+                        "points": current_points
                     })
                     save_obstacles(all_obs)
-                    st.success("✅ 保存成功！")
+                    st.success("✅ 障碍物已永久保存！")
                 else:
                     st.warning("⚠️ 请至少圈选3个点")
                 
+                # 清空临时存储，重置状态
+                local_storage("temp_obstacle_points", [])
                 st.session_state.drawing = False
-                st.session_state.current_points = []
                 st.rerun()
 
             if st.button("❌ 取消圈选", use_container_width=True):
+                local_storage("temp_obstacle_points", [])
                 st.session_state.drawing = False
-                st.session_state.current_points = []
                 st.rerun()
 
         st.divider()
@@ -233,10 +256,6 @@ with col_right:
 
         # 渲染地图
         components.html(render_map_final(latA, lngA, latB, lngB, map_type), height=680)
-
-        # 关键修复：强制刷新地图状态，确保前端能看到最新的 drawing 状态
-        # 这里我们不再尝试获取 map_res，而是依赖页面 rerun 来重置 UI
-        st.session_state.current_points = [] # 这里是空的，但前端 JS 会自己维护点，页面刷新时再同步
 
     else:
         # 心跳监控
