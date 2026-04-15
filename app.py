@@ -3,7 +3,6 @@ import streamlit.components.v1 as components
 import pandas as pd
 import time
 import datetime
-import math
 import json
 import os
 
@@ -38,13 +37,14 @@ def save_obstacles(obs_list):
     with open(OBSTACLE_FILE, 'w', encoding='utf-8') as f:
         json.dump(obs_list, f, ensure_ascii=False, indent=2)
 
-# -------------------------- 初始化状态（核心：状态管理） --------------------------
+# -------------------------- 初始化状态 --------------------------
 if "drawing" not in st.session_state:
     st.session_state.drawing = False
 if "current_points" not in st.session_state:
     st.session_state.current_points = []
 if "save_flag" not in st.session_state:
-    st.session_state.save_flag = False  # 新增保存标记，确保保存逻辑只执行一次
+    st.session_state.save_flag = False
+# 心跳监控状态（完整保留）
 if "heartbeat_data" not in st.session_state:
     st.session_state.heartbeat_data = []
     st.session_state.seq = 0
@@ -67,14 +67,18 @@ def gcj_to_wgs(lat, lon):
 def _transform_lat(x, y):
     ret = -100.0 + 2.0 * x + 3.0 * y + 0.2 * y * y + 0.1 * x * y + 0.2 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(y * math.pi) + 40.0 * math.sin(y / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (160.0 * math.sin(y / 12.0 * math.pi) + 320.0 * math.sin(y / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
 def _transform_lon(x, y):
     ret = 300.0 + x + 2.0 * y + 0.1 * x * x + 0.1 * x * y + 0.1 * math.sqrt(abs(x))
     ret += (20.0 * math.sin(6.0 * x * math.pi) + 20.0 * math.sin(2.0 * x * math.pi)) * 2.0 / 3.0
+    ret += (20.0 * math.sin(x * math.pi) + 40.0 * math.sin(x / 3.0 * math.pi)) * 2.0 / 3.0
+    ret += (150.0 * math.sin(x / 12.0 * math.pi) + 300.0 * math.sin(x / 30.0 * math.pi)) * 2.0 / 3.0
     return ret
 
-# -------------------------- 地图渲染（核心：状态同步） --------------------------
+# -------------------------- 地图渲染 --------------------------
 def render_map(latA, lngA, latB, lngB, map_type):
     obstacles = load_obstacles()
     drawing = st.session_state.drawing
@@ -166,7 +170,6 @@ with col_left:
                 st.rerun()
         else:
             if st.button("✅ 保存并结束圈选", type="primary", use_container_width=True):
-                # 核心：设置保存标记，在地图渲染后执行保存
                 st.session_state.save_flag = True
                 st.session_state.drawing = False
                 st.rerun()
@@ -222,7 +225,7 @@ with col_right:
         if isinstance(map_res, list) and st.session_state.drawing:
             st.session_state.current_points = map_res
 
-        # 核心：在地图渲染后执行保存，确保拿到完整点集
+        # 保存逻辑（地图渲染后执行，确保拿到完整点集）
         if st.session_state.save_flag and len(st.session_state.current_points) > 0:
             all_obs = load_obstacles()
             all_obs.append({
@@ -237,13 +240,14 @@ with col_right:
             st.rerun()
 
     else:
+        # -------------------------- 完整保留心跳监控功能 --------------------------
         st.title("📡 无人机心跳监控")
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("▶️ 开始监测"):
+            if st.button("▶️ 开始监测", use_container_width=True):
                 st.session_state.running = True
         with c2:
-            if st.button("⏸️ 暂停监测"):
+            if st.button("⏸️ 暂停监测", use_container_width=True):
                 st.session_state.running = False
 
         placeholder = st.empty()
@@ -252,7 +256,9 @@ with col_right:
                 st.session_state.seq += 1
                 t = datetime.datetime.now().strftime("%H:%M:%S")
                 st.session_state.heartbeat_data.append({
-                    "序号": st.session_state.seq, "时间": t, "状态": "正常"
+                    "序号": st.session_state.seq,
+                    "时间": t,
+                    "状态": "正常"
                 })
                 df = pd.DataFrame(st.session_state.heartbeat_data)
                 with placeholder.container():
